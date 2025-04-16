@@ -1,0 +1,82 @@
+{
+  "project_info": {
+    "project_number": "841287443686",
+    "project_id": "quisi-8787",
+    "storage_bucket": "quisi-8787.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:841287443686:android:3b524e647e57a00b9fc727",
+        "android_client_info": {
+          "package_name": "com.example.quisi"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "841287443686-peovshgl11c890u1fi5iahio8pd4sri2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDwtr6wWnGqMzlo6Xc8mYMHhq3JjQYWY6c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "841287443686-peovshgl11c890u1fi5iahio8pd4sri2.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "841287443686-eqcc4745a26gf62bbusa5e3lmrom6aik.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.quisiApp"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:841287443686:android:d71c6e539ec6bf099fc727",
+        "android_client_info": {
+          "package_name": "com.example.quisi_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "841287443686-peovshgl11c890u1fi5iahio8pd4sri2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDwtr6wWnGqMzlo6Xc8mYMHhq3JjQYWY6c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "841287443686-peovshgl11c890u1fi5iahio8pd4sri2.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "841287443686-eqcc4745a26gf62bbusa5e3lmrom6aik.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.quisiApp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
