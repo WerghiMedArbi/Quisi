@@ -28,7 +28,7 @@ class AppBackground {
         image: DecorationImage(
           image: AssetImage('assets/images/bg.png'),
           fit: BoxFit.cover,
-          opacity: 0.1,
+          opacity: 0.0,
         ),
       ),
       child: child,
@@ -46,7 +46,11 @@ class AppBackground {
   );
 
   /// Standard app bar settings for consistency
-  static PreferredSizeWidget buildAppBar({required String title, List<Widget>? actions}) {
+  static PreferredSizeWidget buildAppBar({
+    required String title,
+    List<Widget>? actions,
+    Widget? leading,
+  }) {
     return AppBar(
       backgroundColor: Colors.transparent,
       elevation: 0,
@@ -77,6 +81,12 @@ class AppBackground {
           if (actions != null) Row(children: actions),
         ],
       ),
+      leading: leading ?? (navigatorKey.currentState?.canPop() ?? false
+          ? IconButton(
+              icon: Icon(Icons.arrow_back, color: Colors.black87),
+              onPressed: () => navigatorKey.currentState?.pop(),
+            )
+          : null),
     );
   }
 

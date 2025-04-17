@@ -6,9 +6,7 @@ import 'dart:math';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
-    clientId: kIsWeb ? '841287443686-peovshgl11c890u1fi5iahio8pd4sri2.apps.googleusercontent.com' : null,
-  );
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
   // Stream to listen for auth changes
   Stream<User?> get user => _auth.authStateChanges();
   
@@ -97,66 +95,23 @@ class AuthService {
   }
   
   // Sign in with Google
-  Future<User?> signInWithGoogle() async {
+  Future<UserCredential?> signInWithGoogle() async {
     try {
-      // First attempt: Try proper Google Sign-In with the configured client ID
-      try {
-        print('Attempting Google sign-in with client ID...');
-        final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-        
-        if (googleUser == null) {
-          print('User canceled Google sign-in');
-          return null; // User canceled
-        }
-        
-        final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-        final credential = GoogleAuthProvider.credential(
-          accessToken: googleAuth.accessToken,
-          idToken: googleAuth.idToken,
-        );
-        
-        UserCredential result = await _auth.signInWithCredential(credential);
-        print('Successfully signed in with Google');
-        return result.user;
-      } catch (googleError) {
-        print('Google sign-in failed: $googleError');
-        
-        // FALLBACK: Development workaround if Google Sign-In fails
-        print('Attempting development workaround...');
-        
-        // Create a fake credential that will work with Firebase
-        // This is ONLY for development and testing - should be removed in production
-        final email = 'werghimedarbi@gmail.com'; // This can be any valid email format
-        final password = 'MohamedElArbiWerghi87!'; // Strong password for dev testing
-        
-        // First try to sign in (in case this test account already exists)
-        try {
-          UserCredential result = await _auth.signInWithEmailAndPassword(
-            email: email,
-            password: password
-          );
-          print('Signed in with development test account');
-          return result.user;
-        } catch (e) {
-          // Account doesn't exist, let's create it
-          print('Creating development test account');
-          UserCredential result = await _auth.createUserWithEmailAndPassword(
-            email: email,
-            password: password
-          );
-          
-          // Set display name to simulate Google sign-in data
-          await result.user?.updateProfile(
-            displayName: 'WERGOM Tester',
-            photoURL: 'https://api.dicebear.com/6.x/avataaars/svg?seed=123'
-          );
-          
-          return result.user;
-        }
+      if (kIsWeb) {
+        // Web platform - Admin authentication
+        GoogleAuthProvider googleProvider = GoogleAuthProvider();
+        googleProvider.setCustomParameters({
+          'client_id': '841287443686-peovshgl11c890u1fi5iahio8pd4sri2.apps.googleusercontent.com',
+          'prompt': 'select_account'
+        });
+        return await _auth.signInWithPopup(googleProvider);
+      } else {
+        // Mobile platform - Anonymous authentication for participants
+        return await _auth.signInAnonymously();
       }
     } catch (e) {
-      print('Authentication error: $e');
-      throw 'Authentication failed. Please try another sign-in method.';
+      print('Error during authentication: $e');
+      return null;
     }
   }
   
@@ -182,9 +137,15 @@ class AuthService {
   }
   
   // Sign out
-  Future signOut() async {
-    await _googleSignIn.signOut(); // Sign out from Google if signed in
-    await _auth.signOut();
+  Future<void> signOut() async {
+    try {
+      if (kIsWeb) {
+        await _googleSignIn.signOut();
+      }
+      await _auth.signOut();
+    } catch (e) {
+      print('Error signing out: $e');
+    }
   }
   
   // Get current user
@@ -192,4 +153,16 @@ class AuthService {
   
   // Check if user is signed in anonymously
   bool get isAnonymous => _auth.currentUser?.isAnonymous ?? false;
+
+  // Check if user is admin (web only)
+  bool isAdmin() {
+    final user = currentUser;
+    return kIsWeb && user != null && !user.isAnonymous;
+  }
+
+  // Check if user is participant (mobile only)
+  bool isParticipant() {
+    final user = currentUser;
+    return !kIsWeb && user != null && user.isAnonymous;
+  }
 }

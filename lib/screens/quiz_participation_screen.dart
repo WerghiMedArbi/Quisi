@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import '../utils/app_background.dart';
+import 'package:go_router/go_router.dart';
+import 'dart:math' as math;
+import './quiz_results_screen.dart';
 
 class QuizParticipationScreen extends StatefulWidget {
   final String quizId;
@@ -31,6 +34,13 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
   int _score = 0;
   int _currentQuestionIndex = 0;
   int _totalQuestions = 0;
+  ValueNotifier<int> _timeRemaining = ValueNotifier<int>(10);
+  Timer? _timer;
+  bool _sessionEnded = false;
+  DateTime? _questionStartTime;
+  bool _showingTransition = false;
+  int _transitionTimeRemaining = 5;
+  Timer? _transitionTimer;
   
   StreamSubscription? _sessionSubscription;
   StreamSubscription? _participantSubscription;
@@ -39,21 +49,94 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
   void initState() {
     super.initState();
     _listenToSession();
-    _listenToParticipant();
+    _setupParticipantListener();
+  }
+  
+  void _setupParticipantListener() {
+    // Listen for participant document changes
+    _participantSubscription = FirebaseFirestore.instance
+        .collection('sessions')
+        .doc(widget.sessionId)
+        .collection('participants')
+        .doc(widget.participantId)
+        .snapshots()
+        .listen((snapshot) {
+      if (!snapshot.exists || (snapshot.data()?['removed'] ?? false)) {
+        // Participant was removed
+        _handleRemoval();
+        return;
+      }
+
+      final data = snapshot.data() as Map<String, dynamic>;
+      setState(() {
+        _score = data['score'] ?? 0;
+      });
+    });
+  }
+  
+  void _handleRemoval() {
+    // Cancel any existing subscriptions
+    _participantSubscription?.cancel();
+    _sessionSubscription?.cancel();
+    _timer?.cancel();
+    _transitionTimer?.cancel();
+
+    // Show removal dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text('Session Ended'),
+        content: Text('You have been removed from this session by the admin.'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              context.go('/scan');
+            },
+            child: Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
   
   @override
   void dispose() {
+    _timer?.cancel();
+    _transitionTimer?.cancel();
+    _timeRemaining.dispose();
     _sessionSubscription?.cancel();
     _participantSubscription?.cancel();
     super.dispose();
+  }
+  
+  void _startTimer() {
+    _timer?.cancel();
+    
+    if (!mounted || _hasAnswered || _sessionEnded) return;
+    
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || _hasAnswered || _sessionEnded) {
+        timer.cancel();
+        return;
+      }
+      
+      if (_timeRemaining.value <= 0) {
+        timer.cancel();
+        _handleTimeExpired();
+        return;
+      }
+      
+      _timeRemaining.value--;
+    });
   }
   
   void _listenToSession() {
     final sessionRef = FirebaseFirestore.instance.collection('sessions').doc(widget.sessionId);
     
     _sessionSubscription = sessionRef.snapshots().listen((snapshot) async {
-      if (!snapshot.exists) {
+      if (!snapshot.exists || !mounted) {
         setState(() {
           _status = 'Session not found';
           _isLoading = false;
@@ -64,28 +147,70 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
       final sessionData = snapshot.data() as Map<String, dynamic>;
       final bool active = sessionData['active'] ?? false;
       final bool completed = sessionData['completed'] ?? false;
+      final bool sessionEnded = sessionData['sessionEnded'] ?? false;
+      final questionStartTime = sessionData['questionStartTime']?.toDate();
+      final currentQuestionIndex = sessionData['currentQuestionIndex'] ?? 0;
+      
+      // Handle question transitions
+      if (currentQuestionIndex != _currentQuestionIndex && active && !sessionEnded) {
+        _showTransitionMessage();
+      }
+      
+      // Update timer based on server time
+      if (questionStartTime != null && active && !sessionEnded && !_showingTransition) {
+        final now = DateTime.now();
+        final elapsed = now.difference(questionStartTime).inSeconds;
+        final remaining = math.max(0, 10 - elapsed);
+        _timeRemaining.value = remaining;
+        
+        if (remaining > 0 && !_hasAnswered) {
+          _startTimer();
+        }
+      }
+
+      setState(() {
+        _sessionEnded = sessionEnded;
+        _questionStartTime = questionStartTime;
+      });
+
+      if (sessionEnded) {
+        _timer?.cancel();
+        _transitionTimer?.cancel();
+        setState(() {
+          _status = 'Session ended by admin';
+          _isLoading = false;
+          _currentQuestion = null;
+        });
+        
+        // Navigate to results screen
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => QuizResultsScreen(
+                sessionId: widget.sessionId,
+                quizTitle: sessionData['quizTitle'] ?? 'Quiz Results',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+      
+      // Handle question changes
+      if (currentQuestionIndex != _currentQuestionIndex) {
+        setState(() {
+          _hasAnswered = false;
+          _selectedOption = null;
+          _showResults = false;
+        });
+      }
       
       if (completed) {
         setState(() {
           _status = 'Quiz completed!';
           _isLoading = false;
         });
-        
-        // Get final score
-        final participantDoc = await FirebaseFirestore.instance
-            .collection('sessions')
-            .doc(widget.sessionId)
-            .collection('participants')
-            .doc(widget.participantId)
-            .get();
-            
-        if (participantDoc.exists) {
-          final participantData = participantDoc.data() as Map<String, dynamic>;
-          setState(() {
-            _score = participantData['score'] ?? 0;
-          });
-        }
-        
         return;
       }
       
@@ -96,11 +221,8 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
         });
         return;
       }
-      
-      // Active quiz, get current question
-      final int currentQuestionIndex = sessionData['currentQuestionIndex'] ?? 0;
-      
-      // Fetch quiz details to get the question
+
+      // Get current question
       try {
         final quizDoc = await FirebaseFirestore.instance
             .collection('quizzes')
@@ -128,27 +250,9 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
         
         final questionData = questions[currentQuestionIndex] as Map<String, dynamic>;
         
-        // Check if user already answered this question
-        final participantDoc = await FirebaseFirestore.instance
-            .collection('sessions')
-            .doc(widget.sessionId)
-            .collection('participants')
-            .doc(widget.participantId)
-            .get();
-            
-        final participantData = participantDoc.data() as Map<String, dynamic>;
-        final answeredQuestions = List<dynamic>.from(participantData['answeredQuestions'] ?? []);
-        
-        final bool alreadyAnswered = answeredQuestions.contains(currentQuestionIndex);
-        final bool everyoneAnswered = sessionData['everyoneAnswered'] ?? false;
-        
         setState(() {
           _currentQuestion = questionData;
           _correctOptionIndex = questionData['correctOptionIndex'] ?? 0;
-          _hasAnswered = alreadyAnswered;
-          _showResults = everyoneAnswered;
-          _readyForNext = participantData['readyForNextQuestion'] ?? false;
-          _score = participantData['score'] ?? 0;
           _currentQuestionIndex = currentQuestionIndex;
           _totalQuestions = questions.length;
           _isLoading = false;
@@ -164,86 +268,121 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
     });
   }
   
-  void _listenToParticipant() {
-    _participantSubscription = FirebaseFirestore.instance
-        .collection('sessions')
-        .doc(widget.sessionId)
-        .collection('participants')
-        .doc(widget.participantId)
-        .snapshots()
-        .listen((snapshot) {
-      if (!snapshot.exists) return;
-      
-      final data = snapshot.data() as Map<String, dynamic>;
-      setState(() {
-        _score = data['score'] ?? 0;
-      });
+  void _showTransitionMessage() {
+    setState(() {
+      _showingTransition = true;
+      _transitionTimeRemaining = 5;
+      _hasAnswered = false;
+      _selectedOption = null;
+    });
+
+    _transitionTimer?.cancel();
+    _transitionTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+      if (_transitionTimeRemaining > 0) {
+        setState(() {
+          _transitionTimeRemaining--;
+        });
+      } else {
+        timer.cancel();
+        if (mounted) {
+          setState(() {
+            _showingTransition = false;
+          });
+        }
+      }
     });
   }
   
   Future<void> _submitAnswer(int optionIndex) async {
     if (_hasAnswered) return;
     
+    _timer?.cancel();
+    
     setState(() {
       _selectedOption = optionIndex;
       _hasAnswered = true;
+      _timeRemaining.value = 0;
     });
     
     try {
-      // Get current question index
-      final sessionDoc = await FirebaseFirestore.instance
-          .collection('sessions')
-          .doc(widget.sessionId)
-          .get();
-      
-      final sessionData = sessionDoc.data() as Map<String, dynamic>;
-      final currentQuestionIndex = sessionData['currentQuestionIndex'] ?? 0;
-      
-      // Mark this question as answered
-      final participantRef = FirebaseFirestore.instance
+      // Simply update the participant's current answer
+      await FirebaseFirestore.instance
           .collection('sessions')
           .doc(widget.sessionId)
           .collection('participants')
-          .doc(widget.participantId);
-          
-      final participantDoc = await participantRef.get();
-      final participantData = participantDoc.data() as Map<String, dynamic>;
-      
-      List<dynamic> answeredQuestions = List<dynamic>.from(participantData['answeredQuestions'] ?? []);
-      answeredQuestions.add(currentQuestionIndex);
-      
-      // Calculate score
-      int score = participantData['score'] ?? 0;
-      if (optionIndex == _correctOptionIndex) {
-        // Correct answer, add points
-        score += 10;
-      }
-      
-      await participantRef.update({
-        'answeredQuestions': answeredQuestions,
-        'score': score,
+          .doc(widget.participantId)
+          .update({
+        'currentAnswer': optionIndex,
+        'answeredCurrentQuestion': true,
         'lastAnsweredAt': FieldValue.serverTimestamp(),
       });
       
-      // Show snackbar for feedback
       if (!mounted) return;
+
+      // Show correct/wrong answer feedback
+      final isCorrect = optionIndex == _correctOptionIndex;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            optionIndex == _correctOptionIndex 
-              ? 'Correct! +10 points' 
-              : 'Incorrect! The correct answer was option ${_correctOptionIndex + 1}',
+          content: Row(
+            children: [
+              Icon(
+                isCorrect ? Icons.check_circle : Icons.cancel,
+                color: Colors.white,
+              ),
+              SizedBox(width: 8),
+              Text(
+                isCorrect ? 'Correct answer!' : 'Wrong answer',
+              ),
+            ],
           ),
-          backgroundColor: optionIndex == _correctOptionIndex ? Colors.green : Colors.red,
+          backgroundColor: isCorrect ? Colors.green : Colors.red,
         ),
       );
       
     } catch (e) {
-      print('Error submitting answer: $e');
+      print('Error recording answer: $e');
       if (!mounted) return;
+      
+      // Reset state if update fails
+      setState(() {
+        _hasAnswered = false;
+        _selectedOption = null;
+        _timeRemaining.value = 10;
+      });
+      
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error submitting answer: $e')),
+        SnackBar(
+          content: Text('Failed to record answer. Please try again.'),
+          backgroundColor: Colors.red,
+          action: SnackBarAction(
+            label: 'RETRY',
+            textColor: Colors.white,
+            onPressed: () => _submitAnswer(optionIndex),
+          ),
+        ),
       );
+    }
+  }
+  
+  void _handleTimeExpired() {
+    if (!_hasAnswered) {
+      _submitAnswer(-1); // Submit no answer
+      
+      // Show time expired message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.timer_off, color: Colors.white),
+                SizedBox(width: 8),
+                Text('Time\'s up! The correct answer was option ${String.fromCharCode(65 + _correctOptionIndex)}'),
+              ],
+            ),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
     }
   }
   
@@ -276,7 +415,14 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
   Widget build(BuildContext context) {
     if (_isLoading) {
       return Scaffold(
-        appBar: AppBackground.buildAppBar(title: 'Quiz'),
+        appBar: AppBar(
+          title: Text('Quiz'),
+          backgroundColor: AppBackground.primaryColor,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back),
+            onPressed: () => context.go('/scan'),
+          ),
+        ),
         body: AppBackground.buildBackground(
           child: Center(
             child: Column(
@@ -302,9 +448,16 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
     }
     
     // Show quiz completed screen
-    if (_status == 'Quiz completed!') {
+    if (_status == 'Quiz completed!' || _sessionEnded) {
       return Scaffold(
-        appBar: AppBackground.buildAppBar(title: 'Quiz Complete'),
+        appBar: AppBar(
+          title: Text('Quiz Complete'),
+          backgroundColor: AppBackground.primaryColor,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back),
+            onPressed: () => context.go('/scan'),
+          ),
+        ),
         body: AppBackground.buildBackground(
           child: Center(
             child: Column(
@@ -329,16 +482,16 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                       Icon(Icons.celebration, size: 80, color: Colors.amber),
                       SizedBox(height: 16),
                       Text(
-                        'Quiz Completed!', 
+                        _sessionEnded ? 'Session Ended' : 'Quiz Completed!',
                         style: TextStyle(
-                          fontSize: 24, 
+                          fontSize: 24,
                           fontWeight: FontWeight.bold,
                           color: Colors.blue.shade700,
                         ),
                       ),
                       SizedBox(height: 8),
                       Text(
-                        'Your final score: $_score', 
+                        'Your final score: $_score',
                         style: TextStyle(
                           fontSize: 20,
                           color: Colors.blue.shade700,
@@ -346,10 +499,10 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                       ),
                       SizedBox(height: 32),
                       ElevatedButton(
-                        onPressed: () => Navigator.of(context).pop(),
+                        onPressed: () => context.go('/scan'),
                         style: AppBackground.primaryButtonStyle(),
                         child: Text(
-                          'Return to Home',
+                          'Return to Scanner',
                           style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                         ),
                       ),
@@ -366,7 +519,14 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
     // Show waiting screen if no question is available
     if (_currentQuestion == null) {
       return Scaffold(
-        appBar: AppBackground.buildAppBar(title: 'Quiz'),
+        appBar: AppBar(
+          title: Text('Quiz'),
+          backgroundColor: AppBackground.primaryColor,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back),
+            onPressed: () => context.go('/scan'),
+          ),
+        ),
         body: AppBackground.buildBackground(
           child: Center(
             child: Column(
@@ -406,19 +566,57 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
       );
     }
     
+    // Show transition screen
+    if (_showingTransition) {
+      return Scaffold(
+        body: AppBackground.buildBackground(
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.arrow_forward, size: 64, color: Colors.white),
+                SizedBox(height: 24),
+                Text(
+                  'Get Ready!',
+                  style: TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                SizedBox(height: 16),
+                Text(
+                  'Next question in $_transitionTimeRemaining seconds...',
+                  style: TextStyle(
+                    fontSize: 24,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    
     // Show the current question
     final question = _currentQuestion!;
     final options = List<String>.from(question['options'] ?? []);
     
     return Scaffold(
-      appBar: AppBackground.buildAppBar(
-        title: 'Question ${_currentQuestionIndex + 1}/$_totalQuestions',
+      appBar: AppBar(
+        title: Text('Question ${_currentQuestionIndex + 1}/$_totalQuestions'),
+        backgroundColor: AppBackground.primaryColor,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back),
+          onPressed: () => context.go('/scan'),
+        ),
       ),
       body: AppBackground.buildBackground(
         child: SafeArea(
           child: Column(
             children: [
-              // Score indicator
+              // Score and timer indicator
               Container(
                 padding: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                 child: Row(
@@ -432,13 +630,33 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                         color: Colors.white,
                       ),
                     ),
-                    if (_hasAnswered && !_showResults)
-                      Text(
-                        'Waiting for others...',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontStyle: FontStyle.italic,
-                          color: Colors.white,
+                    if (!_hasAnswered && !_showResults)
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.timer, color: Colors.white, size: 18),
+                            SizedBox(width: 8),
+                            ValueListenableBuilder<int>(
+                              valueListenable: _timeRemaining,
+                              builder: (context, timeValue, _) {
+                                return Text(
+                                  '$timeValue s',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
                         ),
                       ),
                   ],
@@ -458,14 +676,11 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Question text
                         Text(
                           question['text'] ?? 'No question text',
                           style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                         ),
                         SizedBox(height: 24),
-                        
-                        // Options list
                         Expanded(
                           child: ListView.builder(
                             itemCount: options.length,
@@ -518,7 +733,7 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                                                         : Colors.grey.shade300,
                                           ),
                                           child: Text(
-                                            String.fromCharCode(65 + index), // A, B, C, D...
+                                            String.fromCharCode(65 + index),
                                             style: TextStyle(
                                               color: Colors.white,
                                               fontWeight: FontWeight.bold,
@@ -532,10 +747,6 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                                             style: TextStyle(fontSize: 16),
                                           ),
                                         ),
-                                        if (isCorrect)
-                                          Icon(Icons.check_circle, color: Colors.green)
-                                        else if (isWrong)
-                                          Icon(Icons.cancel, color: Colors.red),
                                       ],
                                     ),
                                   ),
@@ -544,40 +755,6 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                             },
                           ),
                         ),
-                        
-                        // Ready for next question button
-                        if (_showResults && !_readyForNext)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 16.0),
-                            child: SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton(
-                                onPressed: _markReadyForNextQuestion,
-                                style: AppBackground.secondaryButtonStyle(),
-                                child: Text(
-                                  'READY FOR NEXT QUESTION',
-                                  style: TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ),
-                          ),
-                          
-                        if (_readyForNext)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 16.0),
-                            child: Center(
-                              child: Column(
-                                children: [
-                                  CircularProgressIndicator(),
-                                  SizedBox(height: 8),
-                                  Text(
-                                    'Waiting for next question...',
-                                    style: TextStyle(color: Colors.grey[600]),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
                       ],
                     ),
                   ),

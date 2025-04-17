@@ -128,150 +128,180 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Center(
             child: SingleChildScrollView(
               child: Padding(
-                padding: EdgeInsets.all(24),
+                padding: EdgeInsets.symmetric(
+                  horizontal: MediaQuery.of(context).size.width * 0.1,
+                  vertical: 24,
+                ),
+                
                 child: Card(
-                  elevation: 8,
+                  color: AppBackground.backgroundColor,
+                  elevation: 18,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(26),
                   ),
                   child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Logo
-                        Text(
-                          "QUISI",
-                          style: GoogleFonts.montserrat(
-                            fontSize: 36,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF3F51B5),
-                          ),
-                        ),
-                        Text(
-                          _isRegister ? "Create Your Account" : "Welcome Back",
-                          style: GoogleFonts.roboto(
-                            fontSize: 18,
-                            color: Colors.grey[700],
-                          ),
-                        ),
-                        SizedBox(height: 24),
-                        
-                        // Form fields
-                        if (_isRegister) ...[
-                          TextField(
-                            controller: firstNameController,
-                            decoration: InputDecoration(
-                              labelText: 'First Name',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                          SizedBox(height: 16),
-                          TextField(
-                            controller: lastNameController,
-                            decoration: InputDecoration(
-                              labelText: 'Last Name',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                          SizedBox(height: 16),
-                        ],
-                        TextField(
-                          controller: emailController,
-                          decoration: InputDecoration(
-                            labelText: 'Email',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        SizedBox(height: 16),
-                        TextField(
-                          controller: passwordController,
-                          obscureText: true,
-                          decoration: InputDecoration(
-                            labelText: 'Password',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        
-                        if (_errorMessage != null)
-                          Padding(
-                            padding: EdgeInsets.symmetric(vertical: 16),
-                            child: Container(
-                              width: double.infinity,
-                              padding: EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.red[50],
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.red),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: MediaQuery.of(context).size.width * 0.05,
+                      vertical: 50,
+                    ),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: 500,
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // QUISI Logo
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                "QU",
+                                style: GoogleFonts.montserrat(
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black,
+                                ),
                               ),
+                              Text(
+                                "ISI",
+                                style: GoogleFonts.montserrat(
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppBackground.primaryColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Text(
+                            _isRegister ? "Create Your Account" : "Welcome Back",
+                            style: GoogleFonts.roboto(
+                              fontSize: 18,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                          SizedBox(height: 24),
+                          
+                          // Form fields
+                          if (_isRegister) ...[
+                            TextField(
+                              controller: firstNameController,
+                              decoration: InputDecoration(
+                                labelText: 'First Name',
+                                border: OutlineInputBorder(),
+                                fillColor: AppBackground.backgroundColor,
+                              ),
+                            ),
+                            SizedBox(height: 16),
+                            TextField(
+                              controller: lastNameController,
+                              decoration: InputDecoration(
+                                labelText: 'Last Name',
+                                border: OutlineInputBorder(),
+                                fillColor: AppBackground.backgroundColor,
+                              ),
+                            ),
+                            SizedBox(height: 16),
+                          ],
+                          TextField(
+                            controller: emailController,
+                            decoration: InputDecoration(
+                              labelText: 'Email',
+                              border: OutlineInputBorder(),
+                              fillColor: AppBackground.backgroundColor,
+                            ),
+                          ),
+                          SizedBox(height: 16),
+                          TextField(
+                            controller: passwordController,
+                            obscureText: true,
+                            decoration: InputDecoration(
+                              labelText: 'Password',
+                              border: OutlineInputBorder(),
+                              fillColor: AppBackground.backgroundColor,
+                            ),
+                          ),
+                          
+                          if (_errorMessage != null)
+                            Padding(
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              child: Container(
+                                width: double.infinity,
+                                padding: EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.red[50],
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.red),
+                                ),
+                                child: Text(
+                                  _errorMessage!,
+                                  style: TextStyle(color: Colors.red[700]),
+                                ),
+                              ),
+                            ),
+                          
+                          SizedBox(height: 24),
+                          
+                          // Primary button
+                          if (_isLoading)
+                            CircularProgressIndicator()
+                          else
+                            ElevatedButton(
+                              onPressed: _isRegister ? _signUp : _login,
                               child: Text(
-                                _errorMessage!,
-                                style: TextStyle(color: Colors.red[700]),
+                                _isRegister ? "SIGN UP" : "LOGIN",
+                                style: TextStyle(color: Colors.white, fontSize: 16),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppBackground.primaryColor,
+                                minimumSize: Size(double.infinity, 50),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
                               ),
                             ),
-                          ),
-                        
-                        SizedBox(height: 24),
-                        
-                        // Primary button
-                        if (_isLoading)
-                          CircularProgressIndicator()
-                        else
-                          ElevatedButton(
-                            onPressed: _isRegister ? _signUp : _login,
+                          
+                          SizedBox(height: 16),
+                          
+                          // Toggle between login and register
+                          TextButton(
+                            onPressed: _toggleRegister,
                             child: Text(
-                              _isRegister ? "SIGN UP" : "LOGIN",
-                              style: TextStyle(color: Colors.white, fontSize: 16),
+                              _isRegister 
+                                ? "Already have an account? Login" 
+                                : "Don't have an account? Register now",
+                              style: TextStyle(color: AppBackground.primaryColor),
+                            ),
+                          ),
+                          
+                          Divider(height: 32),
+                          
+                          // Alternative sign-in methods text
+                          Text(
+                            "Or continue with",
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
+                          SizedBox(height: 16),
+                          
+                          // Google sign in button
+                          ElevatedButton.icon(
+                            onPressed: _signInWithGoogle,
+                            icon: FaIcon(FontAwesomeIcons.google, color: AppBackground.primaryColor, size: 18),
+                            label: Text(
+                              "Google",
+                              style: TextStyle(color: AppBackground.primaryColor),
                             ),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue.shade700,
+                              backgroundColor: AppBackground.backgroundColor,
                               minimumSize: Size(double.infinity, 50),
+                              side: BorderSide(color: Colors.grey[300]!),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
                             ),
                           ),
-                        
-                        SizedBox(height: 16),
-                        
-                        // Toggle between login and register
-                        TextButton(
-                          onPressed: _toggleRegister,
-                          child: Text(
-                            _isRegister 
-                              ? "Already have an account? Login" 
-                              : "Don't have an account? Register now",
-                            style: TextStyle(color: Colors.blue.shade700),
-                          ),
-                        ),
-                        
-                        Divider(height: 32),
-                        
-                        // Alternative sign-in methods text
-                        Text(
-                          "Or continue with",
-                          style: TextStyle(color: Colors.grey[600]),
-                        ),
-                        SizedBox(height: 16),
-                        
-                        // Google sign in button
-                        ElevatedButton.icon(
-                          onPressed: _signInWithGoogle,
-                          icon: FaIcon(FontAwesomeIcons.google, color: Colors.black87, size: 18),
-                          label: Text(
-                            "Google",
-                            style: TextStyle(color: Colors.black87),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            minimumSize: Size(double.infinity, 50),
-                            side: BorderSide(color: Colors.grey[300]!),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),

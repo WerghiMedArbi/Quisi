@@ -13,6 +13,7 @@ import 'screens/login_screen.dart';
 import 'screens/admin_dashboard_screen.dart';
 import 'screens/create_quiz_screen.dart';
 import 'screens/edit_quiz_screen.dart';
+import 'screens/quiz_start_session_screen.dart';
 import 'firebase_options.dart';
 import 'services/auth_service.dart';
 import 'utils/app_background.dart';
@@ -53,7 +54,8 @@ class _MyAppState extends State<MyApp> {
         final isAdminRoute = state.matchedLocation.startsWith('/admin') || 
                             state.matchedLocation == '/login' ||
                             state.matchedLocation == '/create-quiz' ||
-                            state.matchedLocation == '/edit-quiz';
+                            state.matchedLocation.startsWith('/edit/') ||
+                            state.matchedLocation.startsWith('/session/');
         
         // Web Platform Rules
         if (kIsWeb) {
@@ -140,10 +142,22 @@ class _MyAppState extends State<MyApp> {
           builder: (context, state) => CreateQuizScreen(),
         ),
         GoRoute(
-          path: '/edit-quiz',
+          path: '/edit/:quizId',
           builder: (context, state) {
-            final quizId = (state.extra as String?) ?? '';
+            final quizId = state.pathParameters['quizId'] ?? '';
             return EditQuizScreen(quizId: quizId);
+          },
+        ),
+        GoRoute(
+          path: '/session/:sessionId',
+          builder: (context, state) {
+            final sessionId = state.pathParameters['sessionId'] ?? '';
+            final extra = state.extra as Map<String, dynamic>? ?? {};
+            return QuizStartSessionScreen(
+              quizId: extra['quizId'] ?? '',
+              sessionId: sessionId,
+              quizTitle: extra['quizTitle'] ?? '',
+            );
           },
         ),
       ],
