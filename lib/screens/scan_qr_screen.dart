@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:qr_code_scanner/qr_code_scanner.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:typed_data';
 import '../utils/app_background.dart';
@@ -10,23 +10,12 @@ class ScanQRScreen extends StatefulWidget {
 }
 
 class _ScanQRScreenState extends State<ScanQRScreen> {
-  final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
-  QRViewController? controller;
+  final MobileScannerController controller = MobileScannerController();
   bool _isProcessing = false;
-
-  void _onQRViewCreated(QRViewController controller) {
-    this.controller = controller;
-    controller.scannedDataStream.listen((scanData) {
-      if (!_isProcessing && scanData.code != null) {
-        _isProcessing = true;
-        context.go('/nickname-entry/${scanData.code}');
-      }
-    });
-  }
 
   @override
   void dispose() {
-    controller?.dispose();
+    controller.dispose();
     super.dispose();
   }
 
@@ -56,16 +45,15 @@ class _ScanQRScreenState extends State<ScanQRScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 24.0),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(16.0),
-                    child: QRView(
-                      key: qrKey,
-                      onQRViewCreated: _onQRViewCreated,
-                      overlay: QrScannerOverlayShape(
-                        borderColor: Colors.white,
-                        borderRadius: 16.0,
-                        borderLength: 30.0,
-                        borderWidth: 10.0,
-                        cutOutSize: MediaQuery.of(context).size.width * 0.7,
-                      ),
+                    child: MobileScanner(
+                      controller: controller,
+                      onDetect: (capture) {
+                        final List<Barcode> barcodes = capture.barcodes;
+                        if (!_isProcessing && barcodes.isNotEmpty && barcodes.first.rawValue != null) {
+                          _isProcessing = true;
+                          context.go('/nickname-entry/${barcodes.first.rawValue}');
+                        }
+                      },
                     ),
                   ),
                 ),
@@ -88,16 +76,5 @@ class _ScanQRScreenState extends State<ScanQRScreen> {
         ),
       ),
     );
-  }
-
-  // Add this method to handle image loading with fallback
-  ImageProvider _buildBackgroundImage() {
-    try {
-      return AssetImage('assets/images/bg.png');
-    } catch (e) {
-      print('Failed to load background image: $e');
-      // Return a transparent image as fallback
-      return MemoryImage(Uint8List.fromList([0, 0, 0, 0]));
-    }
   }
 }
