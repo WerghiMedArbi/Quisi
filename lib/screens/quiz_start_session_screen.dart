@@ -41,7 +41,7 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
     _questionTimer?.cancel();
     _timeRemaining.value = 10;
 
-    _questionTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+    _questionTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       if (!mounted) {
         timer.cancel();
         return;
@@ -51,12 +51,49 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
         _timeRemaining.value--;
       } else {
         timer.cancel();
-        _moveToNextQuestion();
+        await _moveToNextQuestion();
       }
     });
   }
 
+  Future<void> _calculateScore(String participantId, bool isCorrect, int timeRemaining) async {
+    // Score formula: max 100 points for immediate correct answer
+    // Score decreases linearly with time
+    // Wrong answers get 0 points
+    final maxScore = 100;
+    final maxTime = 10; // maximum time in seconds
+    
+    int score = 0;
+    if (isCorrect) {
+      // Calculate score based on remaining time
+      // score = maxScore * (timeRemaining / maxTime)
+      score = (maxScore * timeRemaining / maxTime).round();
+    }
+
+    // Get the participant's reference
+    final participantRef = FirebaseFirestore.instance
+        .collection('sessions')
+        .doc(widget.sessionId)
+        .collection('participants')
+        .doc(participantId);
+
+    // Get current score
+    final participantDoc = await participantRef.get();
+    final currentScore = (participantDoc.data()?['score'] ?? 0) as int;
+
+    // Update participant's score
+    await participantRef.update({
+      'score': currentScore + score,
+      'answeredCurrentQuestion': true,
+      'currentAnswer': isCorrect,
+      'lastAnswerScore': score,
+      'lastAnswerTime': timeRemaining,
+    });
+  }
+
   Future<void> _moveToNextQuestion() async {
+    if (!mounted) return;
+    
     try {
       final sessionRef = FirebaseFirestore.instance
           .collection('sessions')
@@ -79,6 +116,7 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
       final questions = List<Map<String, dynamic>>.from(quizData['questions'] ?? []);
       
       if (currentQuestionIndex >= questions.length - 1) {
+        // Last question completed
         await sessionRef.update({
           'completed': true,
           'active': false,
@@ -86,6 +124,7 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
           'sessionEndedAt': FieldValue.serverTimestamp(),
         });
         _questionTimer?.cancel();
+        
         if (mounted) {
           Navigator.pushReplacement(
             context,
@@ -100,22 +139,30 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
         return;
       }
 
+      // Show transition screen
       await sessionRef.update({
         'showingTransition': true,
         'transitionStartTime': FieldValue.serverTimestamp(),
       });
       
-      await Future.delayed(Duration(seconds: 5));
+      // Wait for transition
+      await Future.delayed(Duration(seconds: 3));
       
+      // Move to next question
       await sessionRef.update({
         'currentQuestionIndex': currentQuestionIndex + 1,
         'questionStartTime': FieldValue.serverTimestamp(),
+        'timerStartedAt': FieldValue.serverTimestamp(),
+        'timerDurationSeconds': 10,
         'everyoneAnswered': false,
         'showingTransition': false,
       });
       
+      // Reset participant answers
       final batch = FirebaseFirestore.instance.batch();
-      final participantsSnapshot = await sessionRef
+      final participantsSnapshot = await FirebaseFirestore.instance
+          .collection('sessions')
+          .doc(widget.sessionId)
           .collection('participants')
           .where('removed', isEqualTo: false)
           .get();
@@ -128,6 +175,8 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
       }
       
       await batch.commit();
+      
+      // Start timer for next question
       _startQuestionTimer();
       
     } catch (e) {
@@ -164,6 +213,10 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
           'sessionEnded': false,
           'startedAt': FieldValue.serverTimestamp(),
           'questionStartTime': FieldValue.serverTimestamp(),
+          'timerStartedAt': FieldValue.serverTimestamp(),
+          'timerDurationSeconds': 10,
+          'currentQuestionIndex': 0,
+          'showingTransition': false,
         });
 
         setState(() => _isActive = true);
@@ -466,17 +519,21 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
 
                                             return ListTile(
                                               leading: CircleAvatar(
-                                                backgroundColor: hasAnswered
-                                                    ? Colors.green.shade100
-                                                    : Colors.grey.shade100,
-                                                child: Icon(
-                                                  hasAnswered
-                                                      ? Icons.check
-                                                      : Icons.hourglass_empty,
-                                                  color: hasAnswered
-                                                      ? Colors.green
-                                                      : Colors.grey,
-                                                ),
+                                                backgroundColor: Colors.transparent,
+                                                child: participant['avatarUrl'] != null
+                                                    ? Image.network(
+                                                        participant['avatarUrl'],
+                                                        width: 40,
+                                                        height: 40,
+                                                        errorBuilder: (context, error, stackTrace) => Icon(
+                                                          Icons.person,
+                                                          color: Colors.grey,
+                                                        ),
+                                                      )
+                                                    : Icon(
+                                                        Icons.person,
+                                                        color: Colors.grey,
+                                                      ),
                                               ),
                                               title: Text(
                                                 participant['name'] ?? 'Anonymous',
@@ -484,6 +541,15 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
                                                   fontWeight: FontWeight.w500,
                                                 ),
                                               ),
+                                              subtitle: hasAnswered 
+                                                ? Text(
+                                                    'Answered',
+                                                    style: TextStyle(
+                                                      color: Colors.green,
+                                                      fontWeight: FontWeight.w500,
+                                                    ),
+                                                  )
+                                                : null,
                                               trailing: Row(
                                                 mainAxisSize: MainAxisSize.min,
                                                 children: [
@@ -642,11 +708,11 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
                               },
                             ),
                           )
-                        : FutureBuilder<DocumentSnapshot>(
-                            future: FirebaseFirestore.instance
+                        : StreamBuilder<DocumentSnapshot>(
+                            stream: FirebaseFirestore.instance
                                 .collection('quizzes')
                                 .doc(widget.quizId)
-                                .get(),
+                                .snapshots(),
                             builder: (context, quizSnapshot) {
                               if (!quizSnapshot.hasData) {
                                 return Center(child: CircularProgressIndicator());
@@ -660,6 +726,42 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
                               if (currentQuestionIndex >= questions.length) {
                                 return Center(
                                   child: Text('Quiz completed!'),
+                                );
+                              }
+
+                              // Check if showing transition
+                              final showingTransition = sessionData['showingTransition'] ?? false;
+                              if (showingTransition) {
+                                return Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.arrow_forward_ios,
+                                        size: 64,
+                                        color: Colors.blue,
+                                      ),
+                                      SizedBox(height: 24),
+                                      Text(
+                                        'Next Question',
+                                        style: TextStyle(
+                                          fontSize: 24,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.blue.shade900,
+                                        ),
+                                      ),
+                                      SizedBox(height: 16),
+                                      Text(
+                                        'Question ${currentQuestionIndex + 2}',
+                                        style: TextStyle(
+                                          fontSize: 20,
+                                          color: Colors.grey[600],
+                                        ),
+                                      ),
+                                      SizedBox(height: 32),
+                                      CircularProgressIndicator(),
+                                    ],
+                                  ),
                                 );
                               }
 
@@ -725,6 +827,46 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
                                     ),
                                   ),
                                   SizedBox(height: 32),
+                                  StreamBuilder<QuerySnapshot>(
+                                    stream: FirebaseFirestore.instance
+                                        .collection('sessions')
+                                        .doc(widget.sessionId)
+                                        .collection('participants')
+                                        .where('removed', isEqualTo: false)
+                                        .snapshots(),
+                                    builder: (context, participantsSnapshot) {
+                                      if (!participantsSnapshot.hasData) {
+                                        return SizedBox();
+                                      }
+
+                                      final participants = participantsSnapshot.data!.docs;
+                                      final answeredCount = participants
+                                          .where((doc) {
+                                            final data = doc.data() as Map<String, dynamic>;
+                                            return data['answeredCurrentQuestion'] == true;
+                                          })
+                                          .length;
+
+                                      return Container(
+                                        padding: EdgeInsets.symmetric(vertical: 8),
+                                        child: Row(
+                                          children: [
+                                            Text(
+                                              '$answeredCount/${participants.length} participants answered',
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                color: Colors.grey[600],
+                                              ),
+                                            ),
+                                            SizedBox(width: 8),
+                                            answeredCount > 0
+                                                ? Icon(Icons.check_circle, color: Colors.green, size: 16)
+                                                : SizedBox(),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
                                   Expanded(
                                     child: ListView.builder(
                                       itemCount: options.length,

@@ -149,28 +149,36 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
       final bool completed = sessionData['completed'] ?? false;
       final bool sessionEnded = sessionData['sessionEnded'] ?? false;
       final questionStartTime = sessionData['questionStartTime']?.toDate();
+      final timerStartedAt = sessionData['timerStartedAt']?.toDate();
+      final timerDurationSeconds = sessionData['timerDurationSeconds'] ?? 10;
       final currentQuestionIndex = sessionData['currentQuestionIndex'] ?? 0;
+      final showingTransition = sessionData['showingTransition'] ?? false;
       
       // Handle question transitions
-      if (currentQuestionIndex != _currentQuestionIndex && active && !sessionEnded) {
-        _showTransitionMessage();
+      if ((currentQuestionIndex != _currentQuestionIndex || showingTransition != _showingTransition) && active && !sessionEnded) {
+        if (showingTransition) {
+          _showTransitionMessage();
+        }
       }
       
       // Update timer based on server time
-      if (questionStartTime != null && active && !sessionEnded && !_showingTransition) {
+      if (timerStartedAt != null && active && !sessionEnded && !showingTransition && !_hasAnswered) {
         final now = DateTime.now();
-        final elapsed = now.difference(questionStartTime).inSeconds;
-        final remaining = math.max(0, 10 - elapsed);
+        final elapsed = now.difference(timerStartedAt).inSeconds;
+        final remaining = math.max<int>(0, timerDurationSeconds - elapsed);
         _timeRemaining.value = remaining;
         
         if (remaining > 0 && !_hasAnswered) {
           _startTimer();
+        } else if (remaining <= 0 && !_hasAnswered) {
+          _handleTimeExpired();
         }
       }
 
       setState(() {
         _sessionEnded = sessionEnded;
         _questionStartTime = questionStartTime;
+        _showingTransition = showingTransition;
       });
 
       if (sessionEnded) {
@@ -203,6 +211,7 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
           _hasAnswered = false;
           _selectedOption = null;
           _showResults = false;
+          _currentQuestionIndex = currentQuestionIndex;
         });
       }
       
@@ -298,29 +307,55 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
     
     _timer?.cancel();
     
+    final isCorrect = optionIndex == _correctOptionIndex;
+    final timeRemaining = _timeRemaining.value;
+    
     setState(() {
       _selectedOption = optionIndex;
       _hasAnswered = true;
-      _timeRemaining.value = 0;
     });
     
     try {
-      // Simply update the participant's current answer
-      await FirebaseFirestore.instance
+      // Get current score
+      final participantRef = FirebaseFirestore.instance
           .collection('sessions')
           .doc(widget.sessionId)
           .collection('participants')
-          .doc(widget.participantId)
-          .update({
+          .doc(widget.participantId);
+          
+      final participantDoc = await participantRef.get();
+      final participantData = participantDoc.data() as Map<String, dynamic>;
+      
+      // Calculate score based on response time
+      int score = participantData['score'] ?? 0;
+      if (isCorrect) {
+        // Max 100 points for immediate correct answer
+        // Score decreases linearly with time
+        // The faster you answer, the more points you get
+        final maxScore = 100;
+        final maxTime = 10; // maximum time in seconds
+        final timeElapsed = maxTime - timeRemaining;
+        
+        // Calculate score: maxScore * (1 - timeElapsed/maxTime)
+        // This gives more points for faster answers
+        final questionScore = (maxScore * (1 - timeElapsed/maxTime)).round();
+        score += questionScore;
+      }
+      
+      // Update participant record
+      await participantRef.update({
         'currentAnswer': optionIndex,
         'answeredCurrentQuestion': true,
         'lastAnsweredAt': FieldValue.serverTimestamp(),
+        'lastAnswerTime': timeRemaining,
+        'lastAnswerScore': score - (participantData['score'] ?? 0),
+        'score': score,
+        'isCorrect': isCorrect,
       });
       
       if (!mounted) return;
 
       // Show correct/wrong answer feedback
-      final isCorrect = optionIndex == _correctOptionIndex;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
@@ -331,7 +366,7 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
               ),
               SizedBox(width: 8),
               Text(
-                isCorrect ? 'Correct answer!' : 'Wrong answer',
+                isCorrect ? 'Correct! +${score - (participantData['score'] ?? 0)} points' : 'Wrong answer',
               ),
             ],
           ),
@@ -347,7 +382,6 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
       setState(() {
         _hasAnswered = false;
         _selectedOption = null;
-        _timeRemaining.value = 10;
       });
       
       ScaffoldMessenger.of(context).showSnackBar(
