@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
-import '../models/quiz_model.dart';
-import '../utils/app_background.dart';
+import '../../models/quiz_model.dart';
+import '../../utils/app_background.dart';
+import '../../services/auth_service.dart';
 
 class CreateQuizScreen extends StatefulWidget {
   @override
@@ -14,12 +15,19 @@ class _CreateQuizScreenState extends State<CreateQuizScreen> {
   final _titleController = TextEditingController();
   List<Map<String, dynamic>> _questions = [];
   bool _isLoading = false;
+  final _authService = AuthService();
 
   Future<String> _getNextQuizId() async {
     try {
-      // Get all existing quizzes
+      // Check if user is authenticated
+      if (_authService.currentUser == null) {
+        throw Exception('User not authenticated');
+      }
+
+      // Get all existing quizzes for the current user
       final querySnapshot = await FirebaseFirestore.instance
           .collection('quizzes')
+          .where('createdBy', isEqualTo: _authService.currentUser?.uid)
           .where('id', isGreaterThan: 'quizId')
           .orderBy('id', descending: true)
           .limit(1)
@@ -48,6 +56,20 @@ class _CreateQuizScreenState extends State<CreateQuizScreen> {
       return;
     }
 
+    // Check if user is authenticated
+    if (_authService.currentUser == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('You must be logged in to create a quiz'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        context.go('/login');
+      }
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -61,6 +83,7 @@ class _CreateQuizScreenState extends State<CreateQuizScreen> {
         'questions': _questions,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
+        'createdBy': _authService.currentUser?.uid,
       });
 
       if (mounted) {
@@ -123,6 +146,7 @@ class _CreateQuizScreenState extends State<CreateQuizScreen> {
             padding: EdgeInsets.all(16),
             children: [
               Card(
+                color: Colors.white,
                 child: Padding(
                   padding: EdgeInsets.all(16),
                   child: Column(
@@ -185,6 +209,7 @@ class _CreateQuizScreenState extends State<CreateQuizScreen> {
 
   Widget _buildQuestionCard(int index, Map<String, dynamic> question) {
     return Card(
+      color: Colors.white,
       margin: EdgeInsets.only(bottom: 16),
       child: Padding(
         padding: EdgeInsets.all(16),

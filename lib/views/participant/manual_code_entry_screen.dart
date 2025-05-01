@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:typed_data'; // Add this import for Uint8List
-import '../utils/app_background.dart';
+import '../../utils/app_background.dart';
 
 class ManualCodeEntryScreen extends StatefulWidget {
   @override
@@ -55,7 +55,7 @@ class _ManualCodeEntryScreenState extends State<ManualCodeEntryScreen> {
                             controller: _codeController,
                             decoration: InputDecoration(
                               labelText: 'Session Code',
-                              hintText: 'Enter the code provided by your teacher',
+                              hintText: 'Enter the code',
                               prefixIcon: Icon(Icons.pin),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12.0),
@@ -77,18 +77,36 @@ class _ManualCodeEntryScreenState extends State<ManualCodeEntryScreen> {
                             ),
                           ),
                           SizedBox(height: 24.0),
-                          ElevatedButton(
-                            onPressed: () {
-                              if (_formKey.currentState!.validate()) {
-                                context.go('/nickname-entry/${_codeController.text}');
-                              }
-                            },
-                            style: AppBackground.secondaryButtonStyle(),
-                            child: const Text(
-                              'JOIN SESSION',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
-                          ),
+                          Row(
+                            children: [
+                              Expanded(child: ElevatedButton(
+                                onPressed: () {
+                                  if (_formKey.currentState!.validate()) {
+                                    context.go('/nickname-entry/${_codeController.text}');
+                                  }
+                                },
+                                style: AppBackground.secondaryButtonStyle(),
+                                child: const Text(
+                                  'JOIN SESSION',
+                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                                ),
+                              )
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(child: ElevatedButton(
+                                onPressed: () {
+                                  
+                                  context.go('/scan');
+                                  
+                                },
+                                style: AppBackground.secondaryButtonStyle(),
+                                child: const Text(
+                                  'SCAN QR CODE',
+                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                                ),
+                              ))
+                            ],
+                          )
                         ],
                       ),
                     ),

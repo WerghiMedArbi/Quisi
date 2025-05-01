@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:go_router/go_router.dart';
-import '../services/auth_service.dart';
-import '../utils/app_background.dart';
-import '../utils/avatar_provider.dart';
+import '../../services/auth_service.dart';
+import '../../utils/app_background.dart';
+import '../../utils/avatar_provider.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:async';
-import './quiz_results_screen.dart';
-import './quiz_start_session_screen.dart';
-import './edit_quiz_screen.dart';
+import '../quiz/quiz_results_screen.dart';
+import '../session/quiz_start_session_screen.dart';
+import '../quiz/edit_quiz_screen.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({Key? key}) : super(key: key);
@@ -117,7 +117,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ),
       body: AppBackground.buildBackground(
         child: StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance.collection('quizzes').snapshots(),
+          stream: FirebaseFirestore.instance
+              .collection('quizzes')
+              .where('createdBy', isEqualTo: _authService.currentUser?.uid)
+              .snapshots(),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(
@@ -266,6 +269,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    IconButton(
+                      icon: Icon(Icons.delete_outline, color: Colors.red),
+                      onPressed: () => _deleteQuiz(quiz.id, quizData['title']),
+                      tooltip: 'Delete quiz',
+                    ),
+                    SizedBox(width: 8),
                     OutlinedButton(
                       onPressed: () {
                         context.go('/edit/${quiz.id}');
@@ -1070,6 +1079,75 @@ class _AdminDashboardState extends State<AdminDashboard> {
           backgroundColor: Colors.red,
         ),
       );
+    }
+  }
+
+  Future<void> _deleteQuiz(String quizId, String quizTitle) async {
+    // Show confirmation dialog
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete Quiz'),
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        content: Text('Are you sure you want to delete "$quizTitle"? This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('CANCEL'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: Text('DELETE'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldDelete != true) return;
+
+    try {
+      // First, check if there are any active sessions using this quiz
+      final sessionsQuery = await FirebaseFirestore.instance
+          .collection('sessions')
+          .where('quizId', isEqualTo: quizId)
+          .where('active', isEqualTo: true)
+          .get();
+
+      if (sessionsQuery.docs.isNotEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Cannot delete quiz while it has active sessions'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Delete the quiz
+      await FirebaseFirestore.instance
+          .collection('quizzes')
+          .doc(quizId)
+          .delete();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Quiz deleted successfully')),
+        );
+      }
+    } catch (e) {
+      print('Error deleting quiz: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error deleting quiz: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 }

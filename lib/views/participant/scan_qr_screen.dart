@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:typed_data';
-import '../utils/app_background.dart';
+import '../../utils/app_background.dart';
 
 class ScanQRScreen extends StatefulWidget {
   @override

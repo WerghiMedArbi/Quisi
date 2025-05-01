@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import '../utils/app_background.dart';
+import '../../utils/app_background.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
-import './quiz_results_screen.dart';
+import '../quiz/quiz_results_screen.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
+import '../../controllers/session/quiz_start_session_controller.dart';
 
 class QuizStartSessionScreen extends StatefulWidget {
   final String quizId;
@@ -26,214 +27,30 @@ class QuizStartSessionScreen extends StatefulWidget {
 }
 
 class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
-  Timer? _questionTimer;
-  final ValueNotifier<int> _timeRemaining = ValueNotifier<int>(10);
-  bool _isActive = false;
+  late QuizStartSessionController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = QuizStartSessionController(
+      quizId: widget.quizId,
+      sessionId: widget.sessionId,
+      quizTitle: widget.quizTitle,
+    );
+  }
 
   @override
   void dispose() {
-    _questionTimer?.cancel();
-    _timeRemaining.dispose();
+    _controller.dispose();
     super.dispose();
-  }
-
-  void _startQuestionTimer() {
-    _questionTimer?.cancel();
-    _timeRemaining.value = 10;
-
-    _questionTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-
-      if (_timeRemaining.value > 0) {
-        _timeRemaining.value--;
-      } else {
-        timer.cancel();
-        await _moveToNextQuestion();
-      }
-    });
-  }
-
-  Future<void> _calculateScore(String participantId, bool isCorrect, int timeRemaining) async {
-    // Score formula: max 100 points for immediate correct answer
-    // Score decreases linearly with time
-    // Wrong answers get 0 points
-    final maxScore = 100;
-    final maxTime = 10; // maximum time in seconds
-    
-    int score = 0;
-    if (isCorrect) {
-      // Calculate score based on remaining time
-      // score = maxScore * (timeRemaining / maxTime)
-      score = (maxScore * timeRemaining / maxTime).round();
-    }
-
-    // Get the participant's reference
-    final participantRef = FirebaseFirestore.instance
-        .collection('sessions')
-        .doc(widget.sessionId)
-        .collection('participants')
-        .doc(participantId);
-
-    // Get current score
-    final participantDoc = await participantRef.get();
-    final currentScore = (participantDoc.data()?['score'] ?? 0) as int;
-
-    // Update participant's score
-    await participantRef.update({
-      'score': currentScore + score,
-      'answeredCurrentQuestion': true,
-      'currentAnswer': isCorrect,
-      'lastAnswerScore': score,
-      'lastAnswerTime': timeRemaining,
-    });
-  }
-
-  Future<void> _moveToNextQuestion() async {
-    if (!mounted) return;
-    
-    try {
-      final sessionRef = FirebaseFirestore.instance
-          .collection('sessions')
-          .doc(widget.sessionId);
-      
-      final sessionDoc = await sessionRef.get();
-      if (!sessionDoc.exists) return;
-      
-      final sessionData = sessionDoc.data() as Map<String, dynamic>;
-      final currentQuestionIndex = sessionData['currentQuestionIndex'] ?? 0;
-      
-      final quizDoc = await FirebaseFirestore.instance
-          .collection('quizzes')
-          .doc(widget.quizId)
-          .get();
-          
-      if (!quizDoc.exists) return;
-      
-      final quizData = quizDoc.data() as Map<String, dynamic>;
-      final questions = List<Map<String, dynamic>>.from(quizData['questions'] ?? []);
-      
-      if (currentQuestionIndex >= questions.length - 1) {
-        // Last question completed
-        await sessionRef.update({
-          'completed': true,
-          'active': false,
-          'sessionEnded': true,
-          'sessionEndedAt': FieldValue.serverTimestamp(),
-        });
-        _questionTimer?.cancel();
-        
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) => QuizResultsScreen(
-                sessionId: widget.sessionId,
-                quizTitle: widget.quizTitle,
-              ),
-            ),
-          );
-        }
-        return;
-      }
-
-      // Show transition screen
-      await sessionRef.update({
-        'showingTransition': true,
-        'transitionStartTime': FieldValue.serverTimestamp(),
-      });
-      
-      // Wait for transition
-      await Future.delayed(Duration(seconds: 3));
-      
-      // Move to next question
-      await sessionRef.update({
-        'currentQuestionIndex': currentQuestionIndex + 1,
-        'questionStartTime': FieldValue.serverTimestamp(),
-        'timerStartedAt': FieldValue.serverTimestamp(),
-        'timerDurationSeconds': 10,
-        'everyoneAnswered': false,
-        'showingTransition': false,
-      });
-      
-      // Reset participant answers
-      final batch = FirebaseFirestore.instance.batch();
-      final participantsSnapshot = await FirebaseFirestore.instance
-          .collection('sessions')
-          .doc(widget.sessionId)
-          .collection('participants')
-          .where('removed', isEqualTo: false)
-          .get();
-          
-      for (var participant in participantsSnapshot.docs) {
-        batch.update(participant.reference, {
-          'answeredCurrentQuestion': false,
-          'currentAnswer': null,
-        });
-      }
-      
-      await batch.commit();
-      
-      // Start timer for next question
-      _startQuestionTimer();
-      
-    } catch (e) {
-      print('Error moving to next question: $e');
-    }
   }
 
   Future<void> _toggleSession() async {
     try {
-      if (!_isActive) {
-        final participantsSnapshot = await FirebaseFirestore.instance
-            .collection('sessions')
-            .doc(widget.sessionId)
-            .collection('participants')
-            .get();
-            
-        if (participantsSnapshot.docs.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Cannot start session without participants'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-          return;
-        }
-        
-        _startQuestionTimer();
-        
-        await FirebaseFirestore.instance
-            .collection('sessions')
-            .doc(widget.sessionId)
-            .update({
-          'active': true,
-          'sessionEnded': false,
-          'startedAt': FieldValue.serverTimestamp(),
-          'questionStartTime': FieldValue.serverTimestamp(),
-          'timerStartedAt': FieldValue.serverTimestamp(),
-          'timerDurationSeconds': 10,
-          'currentQuestionIndex': 0,
-          'showingTransition': false,
-        });
-
-        setState(() => _isActive = true);
+      if (!_controller.isActive) {
+        await _controller.startSession();
       } else {
-        _questionTimer?.cancel();
-        
-        await FirebaseFirestore.instance
-            .collection('sessions')
-            .doc(widget.sessionId)
-            .update({
-          'active': false,
-          'sessionEnded': true,
-          'sessionEndedAt': FieldValue.serverTimestamp(),
-        });
-
-        setState(() => _isActive = false);
-
+        await _controller.endSession();
         if (mounted) {
           Navigator.pushReplacement(
             context,
@@ -247,13 +64,15 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
         }
       }
     } catch (e) {
+      if (e.toString().contains('Cannot start session without participants')) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cannot start session without participants'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
       print('Error toggling session: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error updating session: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
     }
   }
 
@@ -261,17 +80,7 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        // Clean up the session
-        await FirebaseFirestore.instance
-            .collection('sessions')
-            .doc(widget.sessionId)
-            .update({
-          'active': false,
-          'sessionEnded': true,
-          'sessionEndedAt': FieldValue.serverTimestamp(),
-        });
-        
-        // Navigate back to admin
+        await _controller.cleanupSession();
         if (context.mounted) {
           context.go('/admin');
         }
@@ -281,19 +90,9 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
         appBar: AppBackground.buildAppBar(
           title: widget.quizTitle,
           leading: IconButton(
-            icon: Icon(Icons.arrow_back, color: Colors.black87),
+            icon: const Icon(Icons.arrow_back, color: Colors.black87),
             onPressed: () async {
-              // Clean up the session
-              await FirebaseFirestore.instance
-                  .collection('sessions')
-                  .doc(widget.sessionId)
-                  .update({
-                'active': false,
-                'sessionEnded': true,
-                'sessionEndedAt': FieldValue.serverTimestamp(),
-              });
-              
-              // Navigate back to admin
+              await _controller.cleanupSession();
               if (context.mounted) {
                 context.go('/admin');
               }
@@ -307,23 +106,13 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
                 style: TextStyle(color: AppBackground.dangerButtonColor),
               ),
               onPressed: () async {
-                // Clean up the session
-                await FirebaseFirestore.instance
-                    .collection('sessions')
-                    .doc(widget.sessionId)
-                    .update({
-                  'active': false,
-                  'sessionEnded': true,
-                  'sessionEndedAt': FieldValue.serverTimestamp(),
-                });
-                
-                // Navigate back to admin
+                await _controller.cleanupSession();
                 if (context.mounted) {
                   context.go('/admin');
                 }
               },
             ),
-            SizedBox(width: 16),
+            const SizedBox(width: 16),
           ],
         ),
         body: StreamBuilder<DocumentSnapshot>(
@@ -359,12 +148,15 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
                     children: [
                       // Session info
                       Container(
+                        margin: EdgeInsets.only(top: 20),
                         padding: EdgeInsets.all(24),
                         decoration: BoxDecoration(
                           color: Colors.blue.shade50,
                           border: Border(
                             bottom: BorderSide(color: Colors.blue.shade100),
                           ),
+                          borderRadius: BorderRadius.circular(12), 
+                          
                         ),
                         child: Column(
                           children: [
@@ -801,7 +593,7 @@ class _QuizStartSessionScreenState extends State<QuizStartSessionScreen> {
                                                 color: Colors.blue.shade700),
                                             SizedBox(width: 8),
                                             ValueListenableBuilder<int>(
-                                              valueListenable: _timeRemaining,
+                                              valueListenable: _controller.timeRemaining,
                                               builder: (context, timeValue, _) {
                                                 return Text(
                                                   '$timeValue s',

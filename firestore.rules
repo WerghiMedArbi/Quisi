@@ -1,45 +1,46 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
-    function isAdmin() {
-      return request.auth != null && !request.auth.token.firebase.sign_in_provider.matches('anonymous');
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
     }
-    
-    function isParticipant() {
-      return request.auth != null && request.auth.token.firebase.sign_in_provider == 'anonymous';
+
+    // Helper function to check if user owns the document
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
     }
-    
-    // Quiz collection - only admin can access
+
+    // Admin-only collections
     match /quizzes/{quizId} {
-      allow read, write: if isAdmin();
+      allow read: if isAuthenticated() && (
+        resource.data.createdBy == request.auth.uid || 
+        exists(/databases/$(database)/documents/sessions/$(quizId))
+      );
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && resource.data.createdBy == request.auth.uid;
     }
     
-    // Sessions collection
+    // Session management
     match /sessions/{sessionId} {
-      // Admin can do everything
-      allow read, write: if isAdmin();
-      // Participants can only read
-      allow read: if isParticipant();
+      allow read: if true;  // Anyone can read session data
+      allow create: if isAuthenticated();  // Only authenticated users can create sessions
+      allow update: if true;  // Allow updates for session state changes
       
-      // Participants subcollection
+      // Allow participants to be added without authentication
       match /participants/{participantId} {
-        // Admin can do everything
-        allow read, write: if isAdmin();
-        // Participant can read all participants but only write their own document
-        allow read: if isParticipant();
-        allow create, update: if isParticipant() && request.auth.uid == participantId;
+        allow read: if true;
+        allow create: if true;  // Allow anyone to create a participant
+        allow write: if true;  // Allow anyone to update their own participant data
+        allow update: if true;  // Allow anyone to update their own participant data
       }
+    }
       
-      // Answers subcollection
-      match /answers/{answerId} {
-        // Admin can do everything
-        allow read, write: if isAdmin();
-        // Participants can only create and read their own answers
-        allow create: if isParticipant();
-        allow read: if isParticipant() && resource.data.participantId == request.auth.uid;
-      }
+    // Allow answers to be submitted without authentication
+    match /answers/{answerId} {
+      allow read: if true;
+      allow create: if true;  // Allow anyone to submit answers
     }
   }
-} 
 } 

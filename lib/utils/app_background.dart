@@ -52,7 +52,7 @@ class AppBackground {
     Widget? leading,
   }) {
     return AppBar(
-      backgroundColor: Colors.transparent,
+      backgroundColor: backgroundColor,
       elevation: 0,
       title: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,

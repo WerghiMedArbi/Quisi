@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
-import '../utils/app_background.dart';
+import '../../utils/app_background.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:math' as math;
-import './quiz_results_screen.dart';
+import '../quiz/quiz_results_screen.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:lottie/lottie.dart';
 
 class QuizParticipationScreen extends StatefulWidget {
   final String quizId;
@@ -181,26 +183,36 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
         _showingTransition = showingTransition;
       });
 
-      if (sessionEnded) {
+      if (sessionEnded || completed) {
         _timer?.cancel();
         _transitionTimer?.cancel();
+        
+        try {
+          final participantDoc = await FirebaseFirestore.instance
+              .collection('sessions')
+              .doc(widget.sessionId)
+              .collection('participants')
+              .doc(widget.participantId)
+              .get();
+              
+          if (participantDoc.exists && mounted) {
+            final participantData = participantDoc.data() as Map<String, dynamic>;
         setState(() {
-          _status = 'Session ended by admin';
+              _score = participantData['score'] ?? 0;
+              _status = 'Quiz completed!';
           _isLoading = false;
           _currentQuestion = null;
+              _sessionEnded = true;
         });
-        
-        // Navigate to results screen
+          }
+        } catch (e) {
+          print('Error getting final score: $e');
         if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) => QuizResultsScreen(
-                sessionId: widget.sessionId,
-                quizTitle: sessionData['quizTitle'] ?? 'Quiz Results',
-              ),
-            ),
-          );
+            setState(() {
+              _status = 'Error getting results';
+              _isLoading = false;
+            });
+          }
         }
         return;
       }
@@ -213,14 +225,6 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
           _showResults = false;
           _currentQuestionIndex = currentQuestionIndex;
         });
-      }
-      
-      if (completed) {
-        setState(() {
-          _status = 'Quiz completed!';
-          _isLoading = false;
-        });
-        return;
       }
       
       if (!active) {
@@ -308,41 +312,47 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
     _timer?.cancel();
     
     final isCorrect = optionIndex == _correctOptionIndex;
-    final timeRemaining = _timeRemaining.value;
-    
     setState(() {
       _selectedOption = optionIndex;
       _hasAnswered = true;
     });
-    
     try {
-      // Get current score
+      // Fetch session to get timerStartedAt
+      final sessionSnapshot = await FirebaseFirestore.instance
+          .collection('sessions')
+          .doc(widget.sessionId)
+          .get();
+      if (!sessionSnapshot.exists) {
+        print('Session not found');
+        return;
+      }
+      final sessionDataSnap = sessionSnapshot.data() as Map<String, dynamic>;
+      final Timestamp? timerStartedAtTs = sessionDataSnap['timerStartedAt'];
+      final int maxTime = sessionDataSnap['timerDurationSeconds'] ?? 10;
+      DateTime? timerStartedAt;
+      if (timerStartedAtTs != null) {
+        timerStartedAt = timerStartedAtTs.toDate().toUtc();
+      }
+      final nowUtc = DateTime.now().toUtc();
+      int elapsed = 0;
+      if (timerStartedAt != null) {
+        elapsed = nowUtc.difference(timerStartedAt).inSeconds;
+      }
+      int timeRemaining = math.max(0, maxTime - elapsed);
+      // Fetch participant
       final participantRef = FirebaseFirestore.instance
           .collection('sessions')
           .doc(widget.sessionId)
           .collection('participants')
           .doc(widget.participantId);
-          
       final participantDoc = await participantRef.get();
       final participantData = participantDoc.data() as Map<String, dynamic>;
-      
-      // Calculate score based on response time
       int score = participantData['score'] ?? 0;
       if (isCorrect) {
-        // Max 100 points for immediate correct answer
-        // Score decreases linearly with time
-        // The faster you answer, the more points you get
         final maxScore = 100;
-        final maxTime = 10; // maximum time in seconds
-        final timeElapsed = maxTime - timeRemaining;
-        
-        // Calculate score: maxScore * (1 - timeElapsed/maxTime)
-        // This gives more points for faster answers
-        final questionScore = (maxScore * (1 - timeElapsed/maxTime)).round();
+        final questionScore = (maxScore * (1 - elapsed / maxTime)).round();
         score += questionScore;
       }
-      
-      // Update participant record
       await participantRef.update({
         'currentAnswer': optionIndex,
         'answeredCurrentQuestion': true,
@@ -352,6 +362,66 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
         'score': score,
         'isCorrect': isCorrect,
       });
+
+      // Check if this was the last question
+      final sessionDoc = await FirebaseFirestore.instance
+          .collection('sessions')
+          .doc(widget.sessionId)
+          .get();
+      
+      if (!sessionDoc.exists) {
+        print('Session not found');
+        return;
+      }
+
+      final sessionData = sessionDoc.data() as Map<String, dynamic>;
+      final currentQuestionIndex = sessionData['currentQuestionIndex'] ?? 0;
+      
+      final quizDoc = await FirebaseFirestore.instance
+          .collection('quizzes')
+          .doc(widget.quizId)
+          .get();
+      
+      if (!quizDoc.exists) {
+        print('Quiz not found');
+        return;
+      }
+
+      final quizData = quizDoc.data() as Map<String, dynamic>;
+      final questions = List<Map<String, dynamic>>.from(quizData['questions'] ?? []);
+      
+      if (currentQuestionIndex >= questions.length - 1) {
+        // This was the last question, update session state
+        try {
+          await FirebaseFirestore.instance
+              .collection('sessions')
+              .doc(widget.sessionId)
+              .update({
+                'completed': true,
+                'active': false,
+                'sessionEnded': true,
+                'sessionEndedAt': FieldValue.serverTimestamp(),
+              });
+              
+          if (mounted) {
+            setState(() {
+              _status = 'Quiz completed!';
+              _sessionEnded = true;
+              _score = score;
+            });
+          }
+        } catch (e) {
+          print('Error updating session state: $e');
+          // Even if session update fails, show results to the user
+          if (mounted) {
+            setState(() {
+              _status = 'Quiz completed!';
+              _sessionEnded = true;
+              _score = score;
+            });
+          }
+        }
+      }
       
       if (!mounted) return;
 
@@ -378,7 +448,6 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
       print('Error recording answer: $e');
       if (!mounted) return;
       
-      // Reset state if update fails
       setState(() {
         _hasAnswered = false;
         _selectedOption = null;
@@ -386,7 +455,7 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
       
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to record answer. Please try again.'),
+          content: Text('Failed to record answer: ${e.toString()}'),
           backgroundColor: Colors.red,
           action: SnackBarAction(
             label: 'RETRY',
@@ -450,10 +519,36 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
     if (_isLoading) {
       return Scaffold(
         appBar: AppBar(
-          title: Text('Quiz'),
-          backgroundColor: AppBackground.primaryColor,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // QUISI Logo
+              Row(
+                children: [
+                  Text(
+                    "QU",
+                    style: GoogleFonts.montserrat(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black,
+                    ),
+                  ),
+                  Text(
+                    "ISI",
+                    style: GoogleFonts.montserrat(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: AppBackground.primaryColor,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
           leading: IconButton(
-            icon: Icon(Icons.arrow_back),
+            icon: Icon(Icons.arrow_back, color: Colors.black87),
             onPressed: () => context.go('/scan'),
           ),
         ),
@@ -485,67 +580,41 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
     if (_status == 'Quiz completed!' || _sessionEnded) {
       return Scaffold(
         appBar: AppBar(
-          title: Text('Quiz Complete'),
-          backgroundColor: AppBackground.primaryColor,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+              // QUISI Logo
+              Row(
+                    children: [
+                      Text(
+                    "QU",
+                    style: GoogleFonts.montserrat(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                      color: Colors.black,
+                        ),
+                      ),
+                      Text(
+                    "ISI",
+                    style: GoogleFonts.montserrat(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: AppBackground.primaryColor,
+                        ),
+                      ),
+                    ],
+                ),
+              ],
+            ),
           leading: IconButton(
-            icon: Icon(Icons.arrow_back),
+            icon: Icon(Icons.arrow_back, color: Colors.black87),
             onPressed: () => context.go('/scan'),
           ),
         ),
         body: AppBackground.buildBackground(
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: EdgeInsets.all(24),
-                  margin: EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.9),
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 10,
-                        spreadRadius: 5,
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      Icon(Icons.celebration, size: 80, color: Colors.amber),
-                      SizedBox(height: 16),
-                      Text(
-                        _sessionEnded ? 'Session Ended' : 'Quiz Completed!',
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue.shade700,
-                        ),
-                      ),
-                      SizedBox(height: 8),
-                      Text(
-                        'Your final score: $_score',
-                        style: TextStyle(
-                          fontSize: 20,
-                          color: Colors.blue.shade700,
-                        ),
-                      ),
-                      SizedBox(height: 32),
-                      ElevatedButton(
-                        onPressed: () => context.go('/scan'),
-                        style: AppBackground.primaryButtonStyle(),
-                        child: Text(
-                          'Return to Scanner',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
+          child: _buildResultsView(),
         ),
       );
     }
@@ -554,10 +623,36 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
     if (_currentQuestion == null) {
       return Scaffold(
         appBar: AppBar(
-          title: Text('Quiz'),
-          backgroundColor: AppBackground.primaryColor,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // QUISI Logo
+              Row(
+                children: [
+                  Text(
+                    "QU",
+                    style: GoogleFonts.montserrat(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black,
+                    ),
+                  ),
+                  Text(
+                    "ISI",
+                    style: GoogleFonts.montserrat(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: AppBackground.primaryColor,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
           leading: IconButton(
-            icon: Icon(Icons.arrow_back),
+            icon: Icon(Icons.arrow_back, color: Colors.black87),
             onPressed: () => context.go('/scan'),
           ),
         ),
@@ -570,15 +665,18 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                   padding: EdgeInsets.all(20),
                   margin: EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.transparent,
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Column(
                     children: [
-                      Icon(
-                        Icons.hourglass_top,
-                        size: 64,
-                        color: Colors.blue.shade700,
+                      SizedBox(
+                        height: 100,
+                        child: Lottie.asset(
+                          'assets/animations/loader_cat.json',
+                          repeat: true,
+                          animate: true,
+                        ),
                       ),
                       SizedBox(height: 16),
                       Text(
@@ -586,7 +684,7 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
-                          color: Colors.blue.shade700,
+                          color: AppBackground.primaryColor,
                         ),
                         textAlign: TextAlign.center,
                       ),
@@ -608,23 +706,27 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.arrow_forward, size: 64, color: Colors.white),
+                Icon(Icons.arrow_forward, size: 64, color: Colors.blue.shade700),
                 SizedBox(height: 24),
                 Text(
-                  'Get Ready!',
+                  'Next Question',
                   style: TextStyle(
-                    fontSize: 32,
+                    fontSize: 28,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: Colors.blue.shade700,
                   ),
                 ),
-                SizedBox(height: 16),
+                SizedBox(height: 8),
                 Text(
-                  'Next question in $_transitionTimeRemaining seconds...',
+                  'Question ${_currentQuestionIndex + 2}',
                   style: TextStyle(
-                    fontSize: 24,
-                    color: Colors.white,
+                    fontSize: 20,
+                    color: Colors.grey,
                   ),
+                ),
+                SizedBox(height: 32),
+                CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.deepPurple),
                 ),
               ],
             ),
@@ -639,10 +741,36 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
     
     return Scaffold(
       appBar: AppBar(
-        title: Text('Question ${_currentQuestionIndex + 1}/$_totalQuestions'),
-        backgroundColor: AppBackground.primaryColor,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            // QUISI Logo
+            Row(
+              children: [
+                Text(
+                  "Question  ",
+                  style: GoogleFonts.montserrat(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
+                  ),
+                ),
+                Text(
+                  "${_currentQuestionIndex + 1}/$_totalQuestions",
+                  style: GoogleFonts.montserrat(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: AppBackground.primaryColor,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
         leading: IconButton(
-          icon: Icon(Icons.arrow_back),
+          icon: Icon(Icons.arrow_back, color: Colors.black87),
           onPressed: () => context.go('/scan'),
         ),
       ),
@@ -661,7 +789,7 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                        color:  Colors.blue.shade900,
                       ),
                     ),
                     if (!_hasAnswered && !_showResults)
@@ -675,7 +803,9 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.timer, color: Colors.white, size: 18),
+                            Icon(Icons.timer, 
+                            color: Colors.blue.shade700, 
+                            size: 18),
                             SizedBox(width: 8),
                             ValueListenableBuilder<int>(
                               valueListenable: _timeRemaining,
@@ -685,7 +815,7 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                                   style: TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.white,
+                                    color: Colors.blue.shade700,
                                   ),
                                 );
                               },
@@ -705,6 +835,7 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                     borderRadius: BorderRadius.circular(16),
                   ),
                   elevation: 4,
+                  color: Colors.white,
                   child: Padding(
                     padding: EdgeInsets.all(16),
                     child: Column(
@@ -712,7 +843,11 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                       children: [
                         Text(
                           question['text'] ?? 'No question text',
-                          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87,
+                          ),
                         ),
                         SizedBox(height: 24),
                         Expanded(
@@ -732,11 +867,11 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                                     padding: EdgeInsets.all(16),
                                     decoration: BoxDecoration(
                                       color: isCorrect 
-                                          ? Colors.green.shade100 
+                                          ? Colors.green.shade50
                                           : isWrong 
-                                              ? Colors.red.shade100 
+                                              ? Colors.red.shade50
                                               : isSelected 
-                                                  ? Colors.blue.shade100 
+                                                  ? Colors.blue.shade50
                                                   : Colors.grey.shade50,
                                       border: Border.all(
                                         color: isCorrect 
@@ -778,7 +913,10 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
                                         Expanded(
                                           child: Text(
                                             options[index],
-                                            style: TextStyle(fontSize: 16),
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              color: Colors.black87,
+                                            ),
                                           ),
                                         ),
                                       ],
@@ -798,6 +936,355 @@ class _QuizParticipationScreenState extends State<QuizParticipationScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Future<void> _moveToNextQuestion() async {
+    if (!mounted) return;
+    
+    try {
+      final sessionRef = FirebaseFirestore.instance
+          .collection('sessions')
+          .doc(widget.sessionId);
+      
+      final sessionDoc = await sessionRef.get();
+      if (!sessionDoc.exists) return;
+      
+      final sessionData = sessionDoc.data() as Map<String, dynamic>;
+      final currentQuestionIndex = sessionData['currentQuestionIndex'] ?? 0;
+      
+      final quizDoc = await FirebaseFirestore.instance
+          .collection('quizzes')
+          .doc(widget.quizId)
+          .get();
+          
+      if (!quizDoc.exists) return;
+      
+      final quizData = quizDoc.data() as Map<String, dynamic>;
+      final questions = List<Map<String, dynamic>>.from(quizData['questions'] ?? []);
+      
+      if (currentQuestionIndex >= questions.length - 1) {
+        // Last question completed - update session state
+        await sessionRef.update({
+          'completed': true,
+          'active': false,
+          'sessionEnded': true,
+          'sessionEndedAt': FieldValue.serverTimestamp(),
+        });
+        
+        if (mounted) {
+          setState(() {
+            _status = 'Quiz completed!';
+            _sessionEnded = true;
+          });
+        }
+        return;
+      }
+
+      // Show transition screen
+      await sessionRef.update({
+        'showingTransition': true,
+        'transitionStartTime': FieldValue.serverTimestamp(),
+      });
+      
+      // Wait for transition
+      await Future.delayed(Duration(seconds: 3));
+      
+      if (!mounted) return;
+      
+      // Move to next question
+      await sessionRef.update({
+        'currentQuestionIndex': currentQuestionIndex + 1,
+        'questionStartTime': FieldValue.serverTimestamp(),
+        'timerStartedAt': FieldValue.serverTimestamp(),
+        'timerDurationSeconds': 10,
+        'everyoneAnswered': false,
+        'showingTransition': false,
+      });
+      
+      // Reset participant answers
+      final batch = FirebaseFirestore.instance.batch();
+      final participantsSnapshot = await FirebaseFirestore.instance
+          .collection('sessions')
+          .doc(widget.sessionId)
+          .collection('participants')
+          .where('removed', isEqualTo: false)
+          .get();
+          
+      for (var participant in participantsSnapshot.docs) {
+        batch.update(participant.reference, {
+          'answeredCurrentQuestion': false,
+          'currentAnswer': null,
+        });
+      }
+      
+      await batch.commit();
+      
+      if (mounted) {
+        setState(() {
+          _hasAnswered = false;
+          _selectedOption = null;
+          _showResults = false;
+          _currentQuestionIndex = currentQuestionIndex + 1;
+        });
+      }
+      
+      // Start timer for next question
+      _startTimer();
+      
+    } catch (e) {
+      print('Error moving to next question: $e');
+    }
+  }
+
+  Widget _buildResultsView() {
+    return FutureBuilder<QuerySnapshot>(
+      future: FirebaseFirestore.instance
+          .collection('sessions')
+          .doc(widget.sessionId)
+          .collection('participants')
+          .get()
+          .then((snapshot) {
+            print('Debug: Querying session ${widget.sessionId}');
+            print('Debug: Current participant ID: ${widget.participantId}');
+            print('Debug: Total documents found: ${snapshot.docs.length}');
+            
+            for (var doc in snapshot.docs) {
+              print('Debug: Found participant ${doc.id}');
+              print('Debug: Participant data: ${doc.data()}');
+            }
+            
+            return snapshot;
+          }),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text(
+                  'Calculating final results...',
+                  style: TextStyle(
+                    fontSize: 18,
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          print('Error loading results: ${snapshot.error}');
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.error_outline, size: 48, color: Colors.red),
+                SizedBox(height: 16),
+                Text(
+                  'Error loading results: ${snapshot.error}',
+                  style: TextStyle(color: Colors.white),
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () => setState(() {}),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.red,
+                  ),
+                  child: Text('Retry'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          print('No results found. Session ID: ${widget.sessionId}');
+          print('Has data: ${snapshot.hasData}');
+          print('Docs length: ${snapshot.data?.docs.length ?? 0}');
+          
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.info_outline, size: 48, color: Colors.white),
+                SizedBox(height: 16),
+                Text(
+                  'No results available yet.\nPlease wait a moment...',
+                  style: TextStyle(
+                    fontSize: 18,
+                    color: Colors.white,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () => setState(() {}),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: AppBackground.primaryColor,
+                  ),
+                  child: Text('Refresh'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final participants = snapshot.data!.docs;
+        print('Found ${participants.length} participants');
+        int userRank = 0;
+        Map<String, dynamic>? userData;
+
+        for (int i = 0; i < participants.length; i++) {
+          final participant = participants[i].data() as Map<String, dynamic>;
+          if (participants[i].id == widget.participantId) {
+            userRank = i + 1;
+            userData = participant;
+            break;
+          }
+        }
+
+        return Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    SizedBox(height: 24),
+                    if (userRank > 0 && userData != null) ...[
+                      Text(
+                        'Your Results',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
+                      ),
+                      SizedBox(height: 16),
+                      Text(
+                        'Rank: #$userRank',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.black,
+                        ),
+                      ),
+                      Text(
+                        'Score: ${userData['score']}',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.black,
+                        ),
+                      ),
+                      if (userRank <= 3) ...[
+                        SizedBox(height: 16),
+                        Container(
+                          height: 200,
+                          child: Lottie.asset(
+                            'assets/animations/celebration.json',
+                            repeat: true,
+                            animate: true,
+                          ),
+                        ),
+                        Text(
+                          userRank == 1
+                              ? 'Congratulations! You won! 🎉'
+                              : userRank == 2
+                                  ? 'Amazing! Second place! 🥈'
+                                  : 'Great job! Third place! 🥉',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue.shade700,
+                          ),
+                        ),
+                      ] else ...[
+                        SizedBox(height: 16),
+                        Container(
+                          height: 150,
+                          child: Lottie.asset(
+                            'assets/animations/confetti.json',
+                            repeat: true,
+                            animate: true,
+                          ),
+                        ),
+                        Text(
+                          'Thanks for participating! 🌟',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ],
+                    SizedBox(height: 32),
+                    Text(
+                      'Top 3 Players',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
+                      ),
+                    ),
+                    SizedBox(height: 16),
+                    ...participants.take(3).map((doc) {
+                      final data = doc.data() as Map<String, dynamic>;
+                      final rank = participants.indexOf(doc) + 1;
+                      final isCurrentUser = doc.id == widget.participantId;
+                      
+                      return ListTile(
+                        leading: Icon(
+                          Icons.emoji_events,
+                          color: rank == 1
+                              ? Colors.amber
+                              : rank == 2
+                                  ? Colors.grey[400]
+                                  : Colors.brown,
+                        ),
+                        title: Text(
+                          data['name'] ?? 'Unknown Player',
+                          style: TextStyle(
+                            fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.normal,
+                            color: Colors.black,
+                          ),
+                        ),
+                        trailing: Text(
+                          'Score: ${data['score']}',
+                          style: TextStyle(
+                            color: Colors.black,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: ElevatedButton(
+                onPressed: () {
+                  context.go('/scan');
+                },
+                child: Text('Return to Home'),
+                style: ElevatedButton.styleFrom(
+                  minimumSize: Size(double.infinity, 48),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

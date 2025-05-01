@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../models/quiz_model.dart';
-import '../utils/app_background.dart';
+import '../../models/quiz_model.dart';
+import '../../utils/app_background.dart';
 
 class EditQuizScreen extends StatefulWidget {
   final String quizId;
@@ -131,10 +131,11 @@ class _EditQuizScreenState extends State<EditQuizScreen> {
     }
     
     return Scaffold(
+      backgroundColor: AppBackground.backgroundColor,
       appBar: AppBackground.buildAppBar(
         title: 'Edit Quiz',
         actions: [
-          _isSaving ? 
+          if (_isSaving)
             Padding(
               padding: EdgeInsets.all(16.0),
               child: SizedBox(
@@ -145,10 +146,6 @@ class _EditQuizScreenState extends State<EditQuizScreen> {
                   valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                 ),
               ),
-            ) :
-            IconButton(
-              icon: Icon(Icons.save),
-              onPressed: _saveQuiz,
             ),
         ],
       ),
@@ -161,6 +158,7 @@ class _EditQuizScreenState extends State<EditQuizScreen> {
               // Quiz title
               Card(
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                color: Colors.white,
                 child: Padding(
                   padding: EdgeInsets.all(16),
                   child: Column(
@@ -190,9 +188,9 @@ class _EditQuizScreenState extends State<EditQuizScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text('Questions', 
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black)),
                   Text('Total: ${questions.length}', 
-                      style: TextStyle(color: Colors.white)),
+                      style: TextStyle(color: Colors.black)),
                 ],
               ),
               SizedBox(height: 10),
@@ -202,7 +200,7 @@ class _EditQuizScreenState extends State<EditQuizScreen> {
                   margin: EdgeInsets.symmetric(vertical: 20),
                   padding: EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.8),
+                    color: Colors.white,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Center(
@@ -228,6 +226,7 @@ class _EditQuizScreenState extends State<EditQuizScreen> {
                 
                 return Card(
                   margin: EdgeInsets.only(bottom: 16),
+                  color: Colors.white,
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(
@@ -280,10 +279,13 @@ class _EditQuizScreenState extends State<EditQuizScreen> {
               
               SizedBox(height: 16),
               ElevatedButton.icon(
-                icon: Icon(Icons.add),
-                label: Text('Add Question'),
+                icon: Icon(Icons.add, color: Colors.white),
+                label: Text('Add Question', style: TextStyle(color: Colors.white)),
+                
                 style: ElevatedButton.styleFrom(
                   minimumSize: Size(double.infinity, 50),
+                  
+                  backgroundColor: AppBackground.primaryColor,
                 ),
                 onPressed: _addQuestion,
               ),
@@ -369,10 +371,37 @@ class _EditQuizScreenState extends State<EditQuizScreen> {
     }
   }
   
-  void _deleteQuestion(int index) {
+  void _deleteQuestion(int index) async {
     setState(() {
       questions.removeAt(index);
     });
+
+    try {
+      // Update the quiz document in Firestore
+      await FirebaseFirestore.instance
+          .collection('quizzes')
+          .doc(widget.quizId)
+          .update({
+        'questions': questions.map((q) => q.toMap()).toList(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Question deleted successfully')),
+        );
+      }
+    } catch (e) {
+      print('Error deleting question: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error deleting question: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
   
   Future<Question?> _showQuestionDialog([Question? existingQuestion]) async {
@@ -398,30 +427,45 @@ class _EditQuizScreenState extends State<EditQuizScreen> {
         return StatefulBuilder(
           builder: (context, setState) {
             return AlertDialog(
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+              elevation: 16,
+              titlePadding: EdgeInsets.fromLTRB(32, 32, 32, 0),
+              contentPadding: EdgeInsets.fromLTRB(32, 16, 32, 0),
+              actionsPadding: EdgeInsets.fromLTRB(24, 16, 24, 24),
               title: Text(
                 existingQuestion == null ? 'Add Question' : 'Edit Question',
-                style: TextStyle(fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 26,
+                  color: Colors.black87,
+                  letterSpacing: 0.5,
+                ),
               ),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text('Question Text', style: TextStyle(fontWeight: FontWeight.w500, color: Colors.grey[800])),
+                    SizedBox(height: 6),
                     TextField(
                       controller: questionController,
                       decoration: InputDecoration(
-                        labelText: 'Question Text',
                         border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(12),
                         ),
                         filled: true,
                         fillColor: Colors.grey.shade50,
+                        contentPadding: EdgeInsets.symmetric(vertical: 14, horizontal: 12),
                       ),
                       maxLines: 2,
+                      style: TextStyle(fontSize: 16),
                     ),
-                    SizedBox(height: 16),
+                    SizedBox(height: 18),
                     ...List.generate(4, (index) {
                       return Padding(
-                        padding: EdgeInsets.only(bottom: 8),
+                        padding: EdgeInsets.only(bottom: 10),
                         child: Row(
                           children: [
                             Radio<int>(
@@ -432,6 +476,7 @@ class _EditQuizScreenState extends State<EditQuizScreen> {
                                   selectedOptionIndex = value!;
                                 });
                               },
+                              activeColor: Colors.blue.shade700,
                             ),
                             Expanded(
                               child: TextField(
@@ -448,7 +493,9 @@ class _EditQuizScreenState extends State<EditQuizScreen> {
                                   suffixIcon: index == selectedOptionIndex
                                     ? Icon(Icons.check_circle, color: Colors.green)
                                     : null,
+                                  contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 12),
                                 ),
+                                style: TextStyle(fontSize: 15),
                               ),
                             ),
                           ],
@@ -459,60 +506,75 @@ class _EditQuizScreenState extends State<EditQuizScreen> {
                 ),
               ),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text('Cancel'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.grey[700],
-                  ),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    // Validate inputs
-                    if (questionController.text.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Please enter a question'),
-                          backgroundColor: Colors.red,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          if (Navigator.of(context).canPop()) {
+                            Navigator.of(context).pop();
+                          }
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.grey[700],
+                          side: BorderSide(color: Colors.grey.shade300),
+                          padding: EdgeInsets.symmetric(vertical: 14, horizontal: 150),
+                          
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
-                      );
-                      return;
-                    }
-                    
-                    bool hasEmptyOption = false;
-                    List<String> options = [];
-                    
-                    for (var controller in optionControllers) {
-                      if (controller.text.isEmpty) {
-                        hasEmptyOption = true;
-                      }
-                      options.add(controller.text);
-                    }
-                    
-                    if (hasEmptyOption) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Please fill all options'),
-                          backgroundColor: Colors.red,
+                        child: Text('Cancel', style: TextStyle(fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                    SizedBox(width: 16),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          if (questionController.text.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please enter a question'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+                          bool hasEmptyOption = false;
+                          List<String> options = [];
+                          for (var controller in optionControllers) {
+                            if (controller.text.isEmpty) {
+                              hasEmptyOption = true;
+                            }
+                            options.add(controller.text);
+                          }
+                          if (hasEmptyOption) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please fill all options'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+                          if (Navigator.of(context).canPop()) {
+                            Question newQuestion = Question(
+                              text: questionController.text,
+                              options: options,
+                              correctOptionIndex: selectedOptionIndex,
+                            );
+                            Navigator.of(context).pop(newQuestion);
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue.shade700,
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
-                      );
-                      return;
-                    }
-                    
-                    // Create question object
-                    Question newQuestion = Question(
-                      text: questionController.text,
-                      options: options,
-                      correctOptionIndex: selectedOptionIndex,
-                    );
-                    
-                    Navigator.pop(context, newQuestion);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue.shade700,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: Text('Save'),
+                        child: Text('Save', style: TextStyle(fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             );

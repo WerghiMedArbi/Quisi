@@ -1,5 +1,4 @@
-
-import 'package:cloud_firestore/cloud_firestore.dart'; 
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class Question {
   final String text;
@@ -34,13 +33,28 @@ class Quiz {
   final String title;
   final List<Question> questions;
   final DateTime createdAt;
+  final String createdBy;
+  final DateTime? updatedAt;
 
   Quiz({
     required this.id,
     required this.title,
     required this.questions,
     required this.createdAt,
+    required this.createdBy,
+    this.updatedAt,
   });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'title': title,
+      'questions': questions.map((q) => q.toMap()).toList(),
+      'createdAt': Timestamp.fromDate(createdAt),
+      'createdBy': createdBy,
+      'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : null,
+    };
+  }
 
   factory Quiz.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
@@ -52,6 +66,8 @@ class Quiz {
           ?.map((q) => Question.fromMap(q as Map<String, dynamic>))
           .toList() ?? [],
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      createdBy: data['createdBy'] ?? '',
+      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
     );
   }
 }

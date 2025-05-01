@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../utils/app_background.dart';
+import '../../utils/app_background.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class QuizResultsScreen extends StatelessWidget {
   final String sessionId;
@@ -16,7 +17,40 @@ class QuizResultsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBackground.buildAppBar(title: 'Quiz Results'),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            // QUISI Logo
+            Row(
+              children: [
+                Text(
+                  "QU",
+                  style: GoogleFonts.montserrat(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
+                  ),
+                ),
+                Text(
+                  "ISI",
+                  style: GoogleFonts.montserrat(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: AppBackground.primaryColor,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: Colors.black87),
+          onPressed: () => context.go('/admin'),
+        ),
+      ),
       body: AppBackground.buildBackground(
         child: StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
@@ -51,7 +85,17 @@ class QuizResultsScreen extends StatelessWidget {
                   children: [
                     Container(
                       padding: EdgeInsets.all(24),
-                      decoration: AppBackground.cardDecoration(),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.9),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 10,
+                            offset: Offset(0, 5),
+                          ),
+                        ],
+                      ),
                       child: Column(
                         children: [
                           Icon(Icons.emoji_events, size: 64, color: Colors.amber),
@@ -194,20 +238,26 @@ class QuizResultsScreen extends StatelessWidget {
     return Container(
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: Colors.white.withOpacity(0.9),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 5,
+            offset: Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         children: [
-          Icon(icon, color: color, size: 32),
+          Icon(icon, color: AppBackground.primaryColor, size: 32),
           SizedBox(height: 8),
           Text(
             value,
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
-              color: color,
+              color: AppBackground.primaryColor,
             ),
           ),
           Text(

@@ -65,14 +65,6 @@ class AuthService {
       // Update the user's display name if provided
       if (firstName != null && lastName != null) {
         await result.user?.updateDisplayName('$firstName $lastName');
-        
-        // You might also want to store this in Firestore if you're using it
-        // await FirebaseFirestore.instance.collection('users').doc(result.user!.uid).set({
-        //   'firstName': firstName,
-        //   'lastName': lastName,
-        //   'email': email,
-        //   'createdAt': DateTime.now(),
-        // });
       }
       
       return result.user;

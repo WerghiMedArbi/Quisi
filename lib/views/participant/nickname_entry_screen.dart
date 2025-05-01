@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
-import '../utils/app_background.dart';
-import '../utils/avatar_provider.dart';
+import '../../utils/app_background.dart';
+import '../../utils/avatar_provider.dart';
 import 'package:avatar_glow/avatar_glow.dart';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
@@ -146,7 +146,7 @@ class _NicknameEntryScreenState extends State<NicknameEntryScreen> {
                 Text(
                   'Choose your nickname and avatar', 
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    color: Colors.white,
+                    color: Colors.black,
                     fontWeight: FontWeight.bold,
                     fontSize: isSmallScreen ? 20 : 24,
                   ),
@@ -156,7 +156,7 @@ class _NicknameEntryScreenState extends State<NicknameEntryScreen> {
                 Text(
                   'Both your nickname and avatar must be unique',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: Colors.black,
                     fontSize: isSmallScreen ? 14 : 16,
                   ),
                   textAlign: TextAlign.center,
