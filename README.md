@@ -1,4 +1,4 @@
-# **Quizzi Documentation**
+# **Quisi Documentation**
 
 ## **1. Project Overview**
 The project is a real-time audience engagement application where an **admin** can create interactive polls and quizzes via a **web application**, and **participants** can respond via a **Flutter mobile app**. The system supports **live voting, word clouds, quizzes, and analytics**.
